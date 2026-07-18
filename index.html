@@ -270,17 +270,27 @@
           <label for="email">Correo electrónico</label>
           <input type="email" id="email" autocomplete="email" required>
         </div>
+        <div class="fila">
+          <div class="campo">
+            <label for="delegacion">Delegación / Cuerpo de Bomberos</label>
+            <input type="text" id="delegacion" placeholder="Ej.: Dirección Nacional de Bomberos" required>
+          </div>
+          <div class="campo">
+            <label for="pais">País</label>
+            <input type="text" id="pais" autocomplete="country-name" placeholder="Ej.: Uruguay" required>
+          </div>
+        </div>
 
         <div class="sub-seccion">¿Cómo te hospedás?</div>
         <div class="modo-hosp" role="radiogroup" aria-label="Modo de hospedaje">
           <label class="modo-opcion"><input type="radio" name="modoHosp" value="organizacion">
             <span class="radio"></span>
             <span class="modo-txt"><b>ME HOSPEDO CON LA ORGANIZACIÓN</b>
-            <span>Comida y hospedaje cubiertos por la organización, sin costo para vos.</span></span></label>
+            <span>La organización coordina la solicitud. El alojamiento se abona directamente en la Administración de Termas del Arapey y las comidas en el restaurante.</span></span></label>
           <label class="modo-opcion"><input type="radio" name="modoHosp" value="acompanantes">
             <span class="radio"></span>
             <span class="modo-txt"><b>ME HOSPEDO CON ACOMPAÑANTE O FAMILIA</b>
-            <span>Te sumás al alojamiento de esta solicitud: contás en la cantidad de personas y en el cálculo de costos.</span></span></label>
+            <span>Te sumás al alojamiento de esta solicitud. El pago se realiza directamente en la Administración de Termas del Arapey.</span></span></label>
         </div>
         <div class="campo" id="diasCompCampo">
           <label for="diasComp">¿Cuántos días te hospedás?</label>
@@ -308,6 +318,10 @@
           </div>
           <div class="contador-nota">Cantidad de acompañantes</div>
           <div id="listaAcomp"></div>
+        </div>
+        <div class="aloja-nota" style="margin:22px 0 0;padding:14px;border:1px solid var(--linea);background:rgba(212,169,78,.06);font-size:.86rem">
+          <strong style="color:var(--dorado-suave)">IMPORTANTE SOBRE LOS PAGOS:</strong>
+          el alojamiento no se abona a la Dirección Nacional de Bomberos. Debe pagarse directamente en la Administración de Termas del Arapey. Las comidas se pagan directamente en el restaurante.
         </div>
         <div id="panelAloja"></div>
         <div id="panelResumen"></div>
@@ -340,7 +354,8 @@
    URL de la implementación de Apps Script (termina en /exec).
    Vacía = modo demo (no envía, muestra los datos en consola). */
 const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbx4tLbC1wuPfvTJXefO2JfxP8PHGLnZBeoZem6y-E59TZIA0diMQwKU-LzTROH2O9IifQ/exec";
-const DESCUENTO = 0.30; // 30% de descuento sobre el tarifario de alojamiento
+const DESCUENTO = 0.30; // 30% únicamente durante los primeros 3 días de la competencia
+const DIAS_CON_DESCUENTO = 3;
 const PRECIOS_COMIDA = { desayuno: 150, almuerzo: 250, plato: 580 };
 const NOMBRES_COMIDA = { desayuno: 'Desayuno', almuerzo: 'Almuerzo', plato: 'Plato del día' };
 const DIAS_COMIDA = 3;
@@ -349,6 +364,19 @@ const DIAS_COMIDA = 3;
 const $ = id => document.getElementById(id);
 const fmt = n => '$ ' + n.toLocaleString('es-UY');
 const conDescuento = p => Math.round(p * (1 - DESCUENTO));
+function calcularHospedaje(precioLista, dias){
+  const diasDescuento = Math.min(dias, DIAS_CON_DESCUENTO);
+  const diasPrecioCompleto = Math.max(dias - DIAS_CON_DESCUENTO, 0);
+  const precioDescuento = conDescuento(precioLista);
+  return {
+    diasDescuento,
+    diasPrecioCompleto,
+    precioDescuento,
+    costoConDescuento: precioDescuento * diasDescuento,
+    costoPrecioCompleto: precioLista * diasPrecioCompleto,
+    total: (precioDescuento * diasDescuento) + (precioLista * diasPrecioCompleto)
+  };
+}
 const pasos = document.querySelectorAll('.paso');
 const tabs = document.querySelectorAll('.paso-tab');
 let pasoActual = 1;
@@ -566,14 +594,18 @@ function actualizarSugerencia(){
   if (!top.length){ panel.classList.remove('visible'); alojamientoElegido = null; return; }
 
   const opciones = top.map((o, i) => {
-    const pdiaDesc = conDescuento(o.precio);
+    const calculo = calcularHospedaje(o.precio, dias);
     return {
       clave: describirCombo(o),
       descripcion: describirCombo(o),
       capacidad: o.cap,
       precioLista: o.precio,
-      precioPorDia: pdiaDesc,
-      costoTotal: pdiaDesc * dias,
+      precioPorDia: calculo.precioDescuento,
+      diasConDescuento: calculo.diasDescuento,
+      diasSinDescuento: calculo.diasPrecioCompleto,
+      costoConDescuento: calculo.costoConDescuento,
+      costoSinDescuento: calculo.costoPrecioCompleto,
+      costoTotal: calculo.total,
       esSugerido: i === 0
     };
   });
@@ -583,10 +615,10 @@ function actualizarSugerencia(){
     (claveElegida === 'coordinar' ? alojamientoElegido : null);
 
   let html = '<div class="aloja-titulo">¿Cuál alojamiento te gustaría reservar?</div>' +
-    '<div class="desc-tag">✦ 30% DE DESCUENTO APLICADO</div>' +
+    '<div class="desc-tag">✦ 30% EN LOS PRIMEROS 3 DÍAS</div>' +
     '<div class="aloja-nota" style="margin:0 0 12px">Elegí tu preferencia para ' + personas +
     (personas === 1 ? ' persona' : ' personas') + ' por ' + dias + (dias === 1 ? ' día' : ' días') +
-    '. <strong style="color:var(--dorado-suave)">No es una reserva confirmada</strong>: la organización la gestionará según disponibilidad.</div>';
+    '. <strong style="color:var(--dorado-suave)">No es una reserva confirmada</strong>: se gestionará según disponibilidad. El alojamiento se paga en la Administración de Termas del Arapey.</div>';
 
   opciones.forEach((o, i) => {
     const marcada = alojamientoElegido && alojamientoElegido.clave === o.clave;
@@ -597,16 +629,18 @@ function actualizarSugerencia(){
         (o.esSugerido ? '<span class="aloja-tag">MÁS ECONÓMICA</span>' : '') +
         '<span class="aloja-desc">' + o.descripcion + ' <span style="color:var(--humo)">(cap. ' + o.capacidad + ')</span></span>' +
         '<span class="aloja-precio">' + fmt(o.costoTotal) +
-          ' <span style="font-size:.78rem;color:var(--humo)">total · ' + fmt(o.precioPorDia) + '/día</span> ' +
-          '<span class="precio-tachado">' + fmt(o.precioLista) + '/día</span></span>' +
+          ' <span style="font-size:.78rem;color:var(--humo)">total · ' +
+          o.diasConDescuento + ' día(s) a ' + fmt(o.precioPorDia) +
+          (o.diasSinDescuento ? ' + ' + o.diasSinDescuento + ' día(s) a ' + fmt(o.precioLista) : '') +
+          '</span></span>' +
       '</span></label>';
   });
   const coordinarMarcada = alojamientoElegido && alojamientoElegido.clave === 'coordinar';
   html += '<label class="aloja-opcion' + (coordinarMarcada ? ' activo' : '') + '" data-idx="coordinar">' +
     '<input type="radio" name="aloja" value="coordinar"' + (coordinarMarcada ? ' checked' : '') + '>' +
     '<span class="aloja-radio"></span>' +
-    '<span class="aloja-info"><span class="aloja-desc">Prefiero coordinarlo directamente con la organización</span></span></label>';
-  html += '<div class="aloja-nota">Precios de lista de temporada baja, por unidad y por día, con 30% de descuento aplicado. Sujetos a disponibilidad.</div>';
+    '<span class="aloja-info"><span class="aloja-desc">Prefiero coordinar el alojamiento antes de efectuar el pago</span></span></label>';
+  html += '<div class="aloja-nota">El 30% de descuento se aplica únicamente a los primeros 3 días de la competencia. Desde el 4.º día se cobra el precio de lista sin descuento. El alojamiento se paga en la Administración de Termas del Arapey.</div>';
 
   panel.innerHTML = html;
   panel.classList.add('visible');
@@ -617,7 +651,7 @@ function actualizarSugerencia(){
       op.classList.add('activo');
       const idx = op.dataset.idx;
       alojamientoElegido = idx === 'coordinar'
-        ? { clave: 'coordinar', descripcion: 'A coordinar con la organización', capacidad: null, precioLista: null, precioPorDia: null, costoTotal: null, esSugerido: false }
+        ? { clave: 'coordinar', descripcion: 'A coordinar antes del pago', capacidad: null, precioLista: null, precioPorDia: null, costoTotal: null, esSugerido: false }
         : opciones[+idx];
       actualizarResumen();
     });
@@ -656,7 +690,7 @@ function actualizarResumen(){
       hospTexto = alojamientoElegido.descripcion + ' · ' + dias + (dias === 1 ? ' día' : ' días');
       hospMonto = alojamientoElegido.costoTotal;
     } else if (alojamientoElegido && alojamientoElegido.clave === 'coordinar'){
-      hospTexto = 'A coordinar con la organización';
+      hospTexto = 'A coordinar antes del pago';
       coordinar = true;
     } else {
       hospTexto = 'Elegí un alojamiento arriba';
@@ -666,14 +700,14 @@ function actualizarResumen(){
 
   const total = hospMonto + comidas;
   let html = '<div class="aloja-titulo">Resumen de costos</div><div class="resumen">' +
-    '<div class="resumen-fila"><span>Hospedaje (30% desc.)</span><b>' +
+    '<div class="resumen-fila"><span>Hospedaje</span><b>' +
       (hayHospedaje ? (hospMonto ? fmt(hospMonto) : '—') : '—') + '</b></div>' +
     '<div class="resumen-fila" style="border-bottom:none"><span>Comidas</span><b>' + (comidas ? fmt(comidas) : '—') + '</b></div>' +
     '<div class="resumen-total"><span>TOTAL ESTIMADO</span><b>' + fmt(total) +
       (coordinar ? ' <span style="font-size:.75rem;color:var(--crema)">+ hospedaje a coordinar</span>' : '') + '</b></div>' +
     '</div>' +
     '<div class="aloja-nota">' + (hayHospedaje ? hospTexto + '. ' : '') +
-    'Montos estimados y sujetos a confirmación de la organización.</div>';
+    'El alojamiento se paga en la Administración de Termas del Arapey y las comidas en el restaurante. El descuento del 30% corresponde solo a los primeros 3 días.</div>';
 
   panel.innerHTML = html;
   panel.classList.add('visible');
@@ -697,6 +731,8 @@ function validarPaso(n){
     ok = marcar($('nombre'), !$('nombre').value.trim()) && ok;
     ok = marcar($('ci'), !$('ci').value.trim()) && ok;
     ok = marcar($('cel'), !$('cel').value.trim()) && ok;
+    ok = marcar($('delegacion'), !$('delegacion').value.trim()) && ok;
+    ok = marcar($('pais'), !$('pais').value.trim()) && ok;
     const em = $('email');
     ok = marcar(em, !em.value.trim() || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(em.value)) && ok;
     const modo = document.querySelector('input[name="modoHosp"]:checked');
@@ -706,7 +742,7 @@ function validarPaso(n){
     } else if (modo.value === 'acompanantes'){
       ok = marcar($('diasComp'), !$('diasComp').value) && ok;
     }
-    if (!ok) mostrarMsj('Completá tus datos, cómo te hospedás y, si corresponde, los días.', 'err');
+    if (!ok) mostrarMsj('Completá tus datos, delegación, país, cómo te hospedás y, si corresponde, los días.', 'err');
     return ok;
   }
   if (n === 2){
@@ -748,9 +784,11 @@ function generarFicha(d){
     '<tr><td class="et">Cédula</td><td>' + esc(d.competidor.ci) + '</td></tr>' +
     '<tr><td class="et">Celular</td><td>' + esc(d.competidor.celular) + '</td></tr>' +
     '<tr><td class="et">Correo</td><td>' + esc(d.competidor.email) + '</td></tr>' +
+    '<tr><td class="et">Delegación / Cuerpo de Bomberos</td><td>' + esc(d.competidor.delegacion) + '</td></tr>' +
+    '<tr><td class="et">País</td><td>' + esc(d.competidor.pais) + '</td></tr>' +
     '<tr><td class="et">Hospedaje</td><td>' + (d.competidor.modoHospedaje === 'acompanantes'
       ? 'Con acompañante o familia (' + d.competidor.diasHospedaje + (d.competidor.diasHospedaje === 1 ? ' día' : ' días') + ')'
-      : 'Con la organización — comida y hospedaje sin costo') + '</td></tr>' +
+      : 'Alojamiento coordinado para la competencia; pago directo en Termas del Arapey') + '</td></tr>' +
     '</table></div>';
 
   h += '<div class="ficha-sec"><div class="ficha-titulo">Familiares y amigos</div>';
@@ -778,9 +816,10 @@ function generarFicha(d){
       '<tr><td class="et">Personas / días</td><td>' + s.personas + ' personas · ' + s.dias + (s.dias === 1 ? ' día' : ' días') +
         (s.compSeHospeda ? ' (incluye al competidor)' : '') + '</td></tr>' +
       (s.costoTotal
-        ? '<tr><td class="et">Precio de lista</td><td><s>' + fmt(s.precioLista) + '</s> por día</td></tr>' +
-          '<tr><td class="et">Precio con 30% desc.</td><td>' + fmt(s.precioPorDia) + ' por día</td></tr>' +
-          '<tr><td class="et">Subtotal hospedaje</td><td>' + fmt(s.costoTotal) + '</td></tr>'
+        ? '<tr><td class="et">Precio de lista</td><td>' + fmt(s.precioLista) + ' por día</td></tr>' +
+          '<tr><td class="et">Días con 30% de descuento</td><td>' + s.diasConDescuento + ' día(s) a ' + fmt(s.precioPorDia) + '</td></tr>' +
+          (s.diasSinDescuento ? '<tr><td class="et">Días sin descuento</td><td>' + s.diasSinDescuento + ' día(s) a ' + fmt(s.precioLista) + '</td></tr>' : '') +
+          '<tr><td class="et">Subtotal hospedaje</td><td>' + fmt(s.costoTotal) + '</td></tr>' 
         : '') +
       '</table></div>';
   }
@@ -788,12 +827,12 @@ function generarFicha(d){
   if (d.costos){
     h += '<div class="ficha-sec"><div class="ficha-titulo">Resumen de costos</div>' +
       '<table class="ficha-tabla">' +
-      '<tr><td class="et">Hospedaje (30% desc.)</td><td>' + (d.costos.hospedaje ? fmt(d.costos.hospedaje) : (d.costos.hospedajeACoordinar ? 'A coordinar' : '—')) + '</td></tr>' +
+      '<tr><td class="et">Hospedaje</td><td>' + (d.costos.hospedaje ? fmt(d.costos.hospedaje) : (d.costos.hospedajeACoordinar ? 'A coordinar' : '—')) + '</td></tr>' +
       '<tr><td class="et">Comidas</td><td>' + (d.costos.comidas ? fmt(d.costos.comidas) : '—') + '</td></tr>' +
       '<tr><td class="et"><strong>Total estimado</strong></td><td><strong>' + fmt(d.costos.total) +
         (d.costos.hospedajeACoordinar ? ' + hospedaje a coordinar' : '') + '</strong></td></tr>' +
       '</table>' +
-      '<div class="ficha-nota">Montos estimados de temporada baja (alojamiento con 30% de descuento), sujetos a confirmación de la organización. La preferencia de alojamiento no constituye una reserva.</div>' +
+      '<div class="ficha-nota">Montos estimados. El descuento del 30% se aplica solamente a los primeros 3 días de la competencia; desde el 4.º día se cobra la tarifa completa. El alojamiento se paga en la Administración de Termas del Arapey y las comidas directamente en el restaurante. La preferencia no constituye una reserva.</div>' +
       '</div>';
   }
 
@@ -825,7 +864,7 @@ $('btnEnviar').addEventListener('click', async () => {
 
     const comidasTotal = costoComidasTotal();
     const alojamiento = (hosp.personas && alojamientoElegido)
-      ? Object.assign({ descuento: '30%' }, alojamientoElegido, hosp)
+      ? Object.assign({ descuento: '30% primeros 3 días; tarifa completa desde el día 4' }, alojamientoElegido, hosp)
       : null;
     const hospMonto = (alojamiento && alojamiento.costoTotal) ? alojamiento.costoTotal : 0;
     const hospACoordinar = hosp.personas > 0 && !hospMonto;
@@ -836,6 +875,8 @@ $('btnEnviar').addEventListener('click', async () => {
         ci: $('ci').value.trim(),
         celular: $('cel').value.trim(),
         email: $('email').value.trim(),
+        delegacion: $('delegacion').value.trim(),
+        pais: $('pais').value.trim(),
         modoHospedaje: modo,
         diasHospedaje: modo === 'acompanantes' ? +$('diasComp').value : 0
       },

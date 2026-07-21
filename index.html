@@ -69,19 +69,32 @@ function modalidadCompetidor(){return document.querySelector('input[name="modali
 function personasAlojamiento(){return acompanantes.length+(modalidadCompetidor()==='familia_amigos'?1:0);}
 function personasTotalesSolicitud(){return 1+acompanantes.length;}
 function renderHospedaje(){const p=personasAlojamiento(),cont=$('opcionesAlojamiento');if(!modalidadCompetidor()){cont.innerHTML='<p class="nota">Primero indicá si el competidor se hospedará con familiares o amigos.</p>';return}if(p===0){cont.innerHTML='<div class="aviso"><strong>SIN COSTO DE ALOJAMIENTO EN ESTA SOLICITUD</strong><br>El competidor se hospeda con la organización y no se registraron acompañantes.</div>';return}let op=ALOJAMIENTOS.filter(a=>a.cap>=p).sort((a,b)=>a.precio-b.precio).slice(0,3);if(!op.length)op=[{nombre:'Alojamiento para grupo — a coordinar',cap:p,precio:0}];cont.innerHTML=op.map((a,i)=>{const lista=a.precio*DIAS,total=Math.round(lista*(1-DESCUENTO));return `<label class="alojamiento"><input type="radio" name="alojamiento" data-nombre="${a.nombre}" data-cap="${a.cap}" data-precio="${a.precio}" data-total="${total}"><span class="radio-alojamiento"></span><strong>${a.nombre}</strong><span class="precio">${a.precio?fmt(total):'A coordinar'}</span><span class="detalle">Personas incluidas: ${p} · Capacidad: ${a.cap} · 3 días · 30% de descuento${a.precio?' · Sin descuento: '+fmt(lista):''}</span></label>`}).join('');document.querySelectorAll('.alojamiento').forEach(t=>t.onclick=e=>{e.preventDefault();const r=t.querySelector('input');r.checked=true;document.querySelectorAll('.alojamiento').forEach(x=>x.classList.toggle('activo',x===t));})}
-$('enviar').onclick=async()=>{if(!validar1()){mostrarPaso(1);return}guardarAcompanantes();let vacio=false;document.querySelectorAll('.nombreAcomp').forEach(e=>{const m=!e.value.trim();e.classList.toggle('invalido',m);vacio=vacio||m});if(vacio){error('Completá el nombre de todos los acompañantes.');return}const cant=personasAlojamiento(),aloja=document.querySelector('input[name="alojamiento"]:checked');if(cant>0&&!aloja){error('Seleccioná una opción de hospedaje.');return}const comida=document.querySelector('input[name="comida"]:checked');if(!comida){error('Indicá si van a querer comida.');return}const requestId='REQ-'+Date.now()+'-'+Math.random().toString(36).slice(2,10);const mod=modalidadCompetidor(),datos={requestId,competidor:{nombre:$('nombre').value.trim(),delegacion:$('delegacion').value.trim(),email:$('email').value.trim(),telefono:$('telefono').value.trim()},modalidadHospedajeCompetidor:mod,descripcionHospedajeCompetidor:mod==='organizacion'?'Hospedaje organización':'Hospedaje con familiares/amigos',competidorIncluidoEnCosto:mod==='familia_amigos',acompanantes:acompanantes.map(x=>x.trim()),cantidadAcompanantes:acompanantes.length,cantidadPersonasSolicitud:personasTotalesSolicitud(),cantidadPersonasAlojamiento:cant,diasHospedaje:3,descuentoPorcentaje:30,alojamientoReferencia:cant>0?{nombre:aloja.dataset.nombre,capacidad:+aloja.dataset.cap,precioListaDiario:+aloja.dataset.precio,costoReferenciaTresDias:+aloja.dataset.total}:{nombre:'No corresponde',capacidad:0,precioListaDiario:0,costoReferenciaTresDias:0},quierenComida:comida.value==='si',preciosComidaReferencia:{desayuno:150,almuerzo:250,platoDelDia:580},fecha:new Date().toISOString()};const btn=$('enviar');btn.disabled=true;btn.textContent='ENVIANDO…';
-try{
-  await fetch(SCRIPT_URL,{method:'POST',mode:'no-cors',headers:{'Content-Type':'text/plain;charset=utf-8'},body:JSON.stringify(datos)});
-  const resultado=await verificarResultado(requestId,45000);
-  if(!resultado.ok)throw new Error(resultado.error||'El servidor no confirmó la solicitud.');
-  $('correoConfirmado').textContent=datos.competidor.email;
-  $('formulario').style.display='none';
-  document.querySelector('.stepper').style.display='none';
-  $('confirmacion').classList.add('visible');
-  window.scrollTo({top:0,behavior:'smooth'});
-}catch(e){error('No se confirmó la solicitud: '+(e.message||e));}
-finally{btn.disabled=false;btn.textContent='ENVIAR SOLICITUD DE RESERVA'}
-};
-function consultarEstado(requestId){return new Promise((resolve,reject)=>{const cb='estado_'+Date.now()+'_'+Math.random().toString(36).slice(2);const script=document.createElement('script');const limpiar=()=>{delete window[cb];script.remove()};window[cb]=r=>{limpiar();resolve(r)};script.onerror=()=>{limpiar();reject(new Error('No fue posible consultar la confirmación del servidor.'))};script.src=SCRIPT_URL+'?requestId='+encodeURIComponent(requestId)+'&callback='+encodeURIComponent(cb)+'&_='+Date.now();document.body.appendChild(script);setTimeout(()=>{if(window[cb]){limpiar();reject(new Error('El servidor demoró demasiado en responder.'))}},10000)});}
-async function verificarResultado(requestId,limite){const inicio=Date.now();while(Date.now()-inicio<limite){const r=await consultarEstado(requestId);if(r&&!r.pendiente)return r;await new Promise(res=>setTimeout(res,1500));}throw new Error('No se recibió confirmación del servidor. Verificá Apps Script antes de volver a enviar.');}
+function enviarPorFormulario(datos){
+  return new Promise((resolve,reject)=>{
+    const iframe=document.createElement('iframe');
+    iframe.name='envio_reserva_'+Date.now();
+    iframe.style.display='none';
+    document.body.appendChild(iframe);
+
+    const form=document.createElement('form');
+    form.method='POST';
+    form.action=SCRIPT_URL;
+    form.target=iframe.name;
+    form.style.display='none';
+
+    const input=document.createElement('input');
+    input.type='hidden';
+    input.name='payload';
+    input.value=JSON.stringify(datos);
+    form.appendChild(input);
+    document.body.appendChild(form);
+
+    try{form.submit();resolve();}
+    catch(e){reject(e);}
+    finally{setTimeout(()=>{form.remove();iframe.remove();},70000);}
+  });
+}
+function consultarEstado(requestId){return new Promise((resolve,reject)=>{const cb='estado_'+Date.now()+'_'+Math.random().toString(36).slice(2);const script=document.createElement('script');let fin=false;const limpiar=()=>{if(fin)return;fin=true;try{delete window[cb]}catch(_){window[cb]=undefined}script.remove()};window[cb]=r=>{limpiar();resolve(r)};script.onerror=()=>{limpiar();reject(new Error('No se pudo consultar Apps Script. Revisá que la implementación permita acceso a cualquier persona.'))};script.src=SCRIPT_URL+'?action=status&requestId='+encodeURIComponent(requestId)+'&callback='+encodeURIComponent(cb)+'&_='+Date.now();document.body.appendChild(script);setTimeout(()=>{if(!fin){limpiar();reject(new Error('Apps Script no respondió a la consulta de estado.'))}},10000)});}
+async function esperarConfirmacion(requestId,limite=90000){const inicio=Date.now();while(Date.now()-inicio<limite){const r=await consultarEstado(requestId);if(r&&!r.pendiente)return r;await new Promise(res=>setTimeout(res,1800));}throw new Error('No se recibió confirmación del servidor. Revisá Ejecuciones en Apps Script.');}
+$('enviar').onclick=async()=>{if(!validar1()){mostrarPaso(1);return}guardarAcompanantes();let vacio=false;document.querySelectorAll('.nombreAcomp').forEach(e=>{const m=!e.value.trim();e.classList.toggle('invalido',m);vacio=vacio||m});if(vacio){error('Completá el nombre de todos los acompañantes.');return}const cant=personasAlojamiento(),aloja=document.querySelector('input[name="alojamiento"]:checked');if(cant>0&&!aloja){error('Seleccioná una opción de hospedaje.');return}const comida=document.querySelector('input[name="comida"]:checked');if(!comida){error('Indicá si van a querer comida.');return}const mod=modalidadCompetidor(),datos={requestId:'REQ-'+Date.now()+'-'+Math.random().toString(36).slice(2,10),competidor:{nombre:$('nombre').value.trim(),delegacion:$('delegacion').value.trim(),email:$('email').value.trim(),telefono:$('telefono').value.trim()},modalidadHospedajeCompetidor:mod,descripcionHospedajeCompetidor:mod==='organizacion'?'Hospedaje organización':'Hospedaje con familiares/amigos',competidorIncluidoEnCosto:mod==='familia_amigos',acompanantes:acompanantes.map(x=>x.trim()),cantidadAcompanantes:acompanantes.length,cantidadPersonasSolicitud:personasTotalesSolicitud(),cantidadPersonasAlojamiento:cant,diasHospedaje:3,descuentoPorcentaje:30,alojamientoReferencia:cant>0?{nombre:aloja.dataset.nombre,capacidad:+aloja.dataset.cap,precioListaDiario:+aloja.dataset.precio,costoReferenciaTresDias:+aloja.dataset.total}:{nombre:'No corresponde',capacidad:0,precioListaDiario:0,costoReferenciaTresDias:0},quierenComida:comida.value==='si',preciosComidaReferencia:{desayuno:150,almuerzo:250,platoDelDia:580},fecha:new Date().toISOString()};const btn=$('enviar');btn.disabled=true;btn.textContent='ENVIANDO…';try{await enviarPorFormulario(datos);const resultado=await esperarConfirmacion(datos.requestId);if(!resultado.ok)throw new Error(resultado.error||'Apps Script rechazó la solicitud.');$('correoConfirmado').textContent=datos.competidor.email;$('formulario').style.display='none';document.querySelector('.stepper').style.display='none';$('confirmacion').classList.add('visible');window.scrollTo({top:0,behavior:'smooth'})}catch(e){error('No se pudo enviar la reserva: '+(e.message||e));}finally{btn.disabled=false;btn.textContent='ENVIAR SOLICITUD DE RESERVA'}};
 </script></body></html>
